@@ -4,7 +4,7 @@ import { AvatarProfile, ExplanationAnalysis } from '../types';
 import { generateAvatarResponse, generateSpeech, transcribeAudio, explainResponse } from '../services/geminiService';
 import { generateElevenLabsSpeech } from '../services/elevenLabsService';
 import { blobToBase64, decodeAudioData } from '../utils/audioUtils';
-import { Mic, Send, StopCircle, Loader2, Sparkles, BrainCircuit, Activity, BookOpen, User } from 'lucide-react';
+import { Mic, Send, StopCircle, Loader2, Sparkles, BrainCircuit, Activity, BookOpen, User, Calculator } from 'lucide-react';
 
 interface Props {
   profile: AvatarProfile;
@@ -192,7 +192,7 @@ const AvatarChat: React.FC<Props> = ({ profile }) => {
       <div className="mb-2">
           <div className="flex justify-between text-xs text-slate-400 mb-1">
               <span className="flex items-center gap-1">{icon} {label}</span>
-              <span>{score}%</span>
+              <span className="font-mono">{score.toFixed(0)}%</span>
           </div>
           <div className="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden">
               <div 
@@ -240,7 +240,7 @@ const AvatarChat: React.FC<Props> = ({ profile }) => {
                   <button 
                     onClick={() => handleExplain(idx)}
                     className="absolute -right-12 top-1/2 -translate-y-1/2 p-2 text-slate-500 hover:text-cyan-400 transition-colors opacity-0 group-hover:opacity-100"
-                    title="Explain Decision Logic"
+                    title="Analyze Response Vectors"
                   >
                       <BrainCircuit size={20} />
                   </button>
@@ -250,24 +250,30 @@ const AvatarChat: React.FC<Props> = ({ profile }) => {
             {/* Explainability Dashboard */}
             {explainingIndex === idx && m.role === 'model' && (
                 <div className="max-w-[85%] w-full mt-3 bg-slate-950/80 border border-cyan-900/50 rounded-lg p-4 animate-in fade-in slide-in-from-top-2 backdrop-blur-sm">
-                    <h4 className="text-xs font-bold text-cyan-400 mb-3 flex items-center gap-2 uppercase tracking-wider">
-                        <Activity size={14} /> Cognitive Decision Map
-                    </h4>
+                    <div className="flex justify-between items-start mb-3">
+                        <h4 className="text-xs font-bold text-cyan-400 flex items-center gap-2 uppercase tracking-wider">
+                            <Activity size={14} /> Hybrid Analysis
+                        </h4>
+                        <span className="text-[10px] text-slate-500 border border-slate-800 px-2 py-0.5 rounded bg-slate-900 flex items-center gap-1">
+                            <Calculator size={10} />
+                            Vector Embedding Scores
+                        </span>
+                    </div>
                     
                     {!m.explanation ? (
                          <div className="flex items-center gap-2 text-slate-500 text-xs h-16">
                             <Loader2 className="animate-spin text-cyan-500" size={14} />
-                            Analyzing prompt influence weights...
+                            Calculating Cosine Similarities...
                          </div>
                     ) : (
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div className="space-y-1">
-                                {renderExplanationBar('Personality Trait Influence', m.explanation.personalityScore, 'bg-yellow-500', <User size={12}/>)}
+                                {renderExplanationBar('Personality Alignment', m.explanation.personalityScore, 'bg-yellow-500', <User size={12}/>)}
                                 {renderExplanationBar('Memory Retrieval', m.explanation.memoriesScore, 'bg-green-500', <BookOpen size={12}/>)}
-                                {renderExplanationBar('Writing Style Match', m.explanation.styleScore, 'bg-blue-500', <Sparkles size={12}/>)}
+                                {renderExplanationBar('Style Match', m.explanation.styleScore, 'bg-blue-500', <Sparkles size={12}/>)}
                             </div>
                             <div className="bg-slate-900/50 rounded p-3 border border-slate-800">
-                                <span className="text-xs text-slate-500 font-mono block mb-1">REASONING TRACE:</span>
+                                <span className="text-xs text-slate-500 font-mono block mb-1">COGNITIVE TRACE:</span>
                                 <p className="text-xs text-slate-300 italic">
                                     "{m.explanation.reasoning}"
                                 </p>

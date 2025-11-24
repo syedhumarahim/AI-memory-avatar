@@ -165,7 +165,49 @@ export const transcribeAudio = async (audioBase64: string, mimeType: string = 'a
   });
 };
 
-// --- EXPLAINABILITY SERVICE ---
+// --- HYBRID EXPLAINABILITY SERVICE ---
+
+/**
+ * Helper: Generate embeddings for text using text-embedding-004
+ */
+const getEmbedding = async (text: string): Promise<number[]> => {
+    if (!text || text.length < 2) return Array(768).fill(0);
+    const ai = getAiClient();
+    try {
+        // Truncate simply to avoid token limits on embeddings for this demo
+        const truncated = text.substring(0, 2000);
+        const result = await ai.models.embedContent({
+            model: MODELS.EMBEDDING,
+            contents: { parts: [{ text: truncated }] }
+        });
+        // result.embedding might be deprecated in favor of result.embeddings in some SDK versions
+        const embedding = result.embeddings?.[0] || (result as any).embedding;
+        return embedding?.values || [];
+    } catch (e) {
+        console.warn("Embedding failed", e);
+        return Array(768).fill(0);
+    }
+};
+
+/**
+ * Helper: Calculate Cosine Similarity between two vectors
+ */
+const cosineSimilarity = (vecA: number[], vecB: number[]): number => {
+    if (!vecA.length || !vecB.length || vecA.length !== vecB.length) return 0;
+    
+    let dotProduct = 0;
+    let normA = 0;
+    let normB = 0;
+    
+    for (let i = 0; i < vecA.length; i++) {
+        dotProduct += vecA[i] * vecB[i];
+        normA += vecA[i] * vecA[i];
+        normB += vecB[i] * vecB[i];
+    }
+    
+    if (normA === 0 || normB === 0) return 0;
+    return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+};
 
 export const explainResponse = async (
   profile: AvatarProfile,
@@ -174,47 +216,77 @@ export const explainResponse = async (
 ): Promise<ExplanationAnalysis> => {
     const ai = getAiClient();
 
-    const prompt = `
-    You are an expert AI Interpretable System. 
-    Analyze the following interaction where an AI Persona named "${profile.name}" responded to a user.
-    
-    Bot Persona Definitions:
-    1. Personality: ${profile.personality}
-    2. Memories: ${profile.memories}
-    3. Style: ${profile.styleSamples}
-
-    Interaction:
-    User: "${userMessage}"
-    Bot Response: "${botResponse}"
-
-    Task:
-    Explain WHY the bot generated this specific response.
-    Assign a percentage score (0-100) to how much each factor (Personality, Memories, Style) influenced the output.
-    Provide a brief "Cognitive Trace" explanation.
-
-    Return JSON format only.
-    `;
-
     try {
+        // 1. CALCULATE ACTUAL SCORES (Technical Explainability)
+        // We run embeddings in parallel for speed
+        const [responseEmb, memEmb, styleEmb, persEmb] = await Promise.all([
+            getEmbedding(botResponse),
+            getEmbedding(profile.memories),
+            getEmbedding(profile.styleSamples),
+            getEmbedding(profile.personality)
+        ]);
+
+        // Calculate raw cosine similarity (0.0 to 1.0)
+        const rawMemScore = cosineSimilarity(responseEmb, memEmb);
+        const rawStyleScore = cosineSimilarity(responseEmb, styleEmb);
+        const rawPersScore = cosineSimilarity(responseEmb, persEmb);
+
+        // Normalize for UI (0-100). 
+        // Semantic similarity usually ranges 0.4-0.9 for related text. 
+        // We scale it to make differences visible.
+        const normalize = (val: number) => Math.min(100, Math.max(0, Math.round((val - 0.3) * 200))); 
+
+        const finalMemScore = normalize(rawMemScore);
+        const finalStyleScore = normalize(rawStyleScore);
+        const finalPersScore = normalize(rawPersScore);
+
+        // 2. GENERATE NARRATIVE REASONING (LLM)
+        // We feed the *Actual* scores to the LLM so it explains the math, rather than making up numbers.
+        const prompt = `
+        You are an expert AI Interpretable System Analyst. 
+        
+        DATA:
+        - Bot Name: "${profile.name}"
+        - User Input: "${userMessage}"
+        - Bot Response: "${botResponse}"
+        
+        CALCULATED VECTOR SCORES (Cosine Similarity):
+        - Personality Alignment: ${finalPersScore}%
+        - Memory Retrieval: ${finalMemScore}%
+        - Style Match: ${finalStyleScore}%
+
+        TASK:
+        Provide a brief "Cognitive Trace" explanation (1-2 sentences).
+        Explain WHY the bot responded this way, referencing the scores above.
+        For example, if Memory is high, mention it found a relevant memory. If Style is high, mention it matched the tone.
+
+        Return JSON format only.
+        `;
+
         const response = await ai.models.generateContent({
-            model: "gemini-2.5-flash", // Use fast model for analysis
+            model: "gemini-2.5-flash", 
             contents: prompt,
             config: {
                 responseMimeType: "application/json",
                 responseSchema: {
                     type: Type.OBJECT,
                     properties: {
-                        personalityScore: { type: Type.NUMBER, description: "Influence of personality traits (0-100)" },
-                        memoriesScore: { type: Type.NUMBER, description: "Influence of specific memories (0-100)" },
-                        styleScore: { type: Type.NUMBER, description: "Influence of speaking style (0-100)" },
-                        reasoning: { type: Type.STRING, description: "Short explanation of why this text was chosen." }
+                        reasoning: { type: Type.STRING, description: "Explanation of the response based on vector scores." }
                     }
                 }
             }
         });
 
         const jsonText = response.text || "{}";
-        return JSON.parse(jsonText) as ExplanationAnalysis;
+        const result = JSON.parse(jsonText);
+
+        return {
+            personalityScore: finalPersScore,
+            memoriesScore: finalMemScore,
+            styleScore: finalStyleScore,
+            reasoning: result.reasoning || "Analysis complete."
+        };
+
     } catch (e) {
         console.error("Explanation failed", e);
         return {
