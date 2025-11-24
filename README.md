@@ -3,8 +3,8 @@
 
 **Link to the webapp:** https://copy-of-personaai-avatar-466019446946.us-west1.run.app
 
-[![Memory Avatar Demo part 1](https://drive.google.com/file/d/1K_kI3TNDzpfotQEAyglGD1lltRhOfVyI/view?usp=sharing)](https://www.loom.com/share/6ef7fe0097d3421d913796c243ad0664)
-[![Memory Avatar Demo part 2](https://drive.google.com/file/d/1K_kI3TNDzpfotQEAyglGD1lltRhOfVyI/view?usp=sharing)](https://www.loom.com/share/cdb9adc86b7d404298748dc0ff127c50)
+[![Memory Avatar Demo part 1](https://drive.google.com/uc?export=view&id=1K_kI3TNDzpfotQEAyglGD1lltRhOfVyI)](https://www.loom.com/share/6ef7fe0097d3421d913796c243ad0664)
+[![Memory Avatar Demo part 2](https://drive.google.com/uc?export=view&id=1K_kI3TNDzpfotQEAyglGD1lltRhOfVyI)](https://www.loom.com/share/cdb9adc86b7d404298748dc0ff127c50)
 
 ## Motivation
 Loss is a profound human experience, and often we are left wishing for just one more conversation with a loved one. "Back to Life" is motivated by the desire to use advanced AI not just for productivity, but for emotional connection. It bridges the gap between static memories (photos, diaries) and dynamic interaction, allowing users to "bring to life" a digital persona that feels familiar, warm, and responsive.
