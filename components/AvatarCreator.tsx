@@ -22,7 +22,6 @@ const AvatarCreator: React.FC<Props> = ({ onProfileCreated }) => {
 
   // ElevenLabs State
   const [useElevenLabs, setUseElevenLabs] = useState(false);
-  const [elevenApiKey, setElevenApiKey] = useState('');
   const [voiceSample, setVoiceSample] = useState<File | null>(null);
   
   // Generation State
@@ -49,10 +48,11 @@ const AvatarCreator: React.FC<Props> = ({ onProfileCreated }) => {
       let elevenLabsVoiceId = undefined;
 
       // Voice Cloning Flow
-      if (useElevenLabs && elevenApiKey && voiceSample) {
+      if (useElevenLabs && voiceSample) {
         setStatusMessage('Cloning voice with ElevenLabs...');
         try {
-           elevenLabsVoiceId = await createElevenLabsVoice(elevenApiKey, name, voiceSample);
+           // Key is now handled internally in the service file
+           elevenLabsVoiceId = await createElevenLabsVoice(name, voiceSample);
         } catch (err: any) {
            throw new Error("Voice Cloning Failed: " + err.message);
         }
@@ -66,7 +66,6 @@ const AvatarCreator: React.FC<Props> = ({ onProfileCreated }) => {
         memories,
         imageBase64,
         voiceName: voice,
-        elevenLabsApiKey: useElevenLabs ? elevenApiKey : undefined,
         elevenLabsVoiceId: elevenLabsVoiceId,
       };
 
@@ -206,16 +205,6 @@ const AvatarCreator: React.FC<Props> = ({ onProfileCreated }) => {
             {useElevenLabs && (
                 <div className="space-y-4 animate-in fade-in slide-in-from-top-2">
                     <div>
-                        <label className="block text-xs font-medium text-slate-400 mb-1">ElevenLabs API Key</label>
-                        <input 
-                            type="password" 
-                            value={elevenApiKey}
-                            onChange={(e) => setElevenApiKey(e.target.value)}
-                            className="w-full bg-slate-800 border border-slate-600 rounded-lg p-2.5 text-white text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
-                            placeholder="sk_..."
-                        />
-                    </div>
-                    <div>
                          <label className="block text-xs font-medium text-slate-400 mb-1">Voice Sample (Audio File)</label>
                          <input 
                             type="file" 
@@ -231,7 +220,7 @@ const AvatarCreator: React.FC<Props> = ({ onProfileCreated }) => {
 
         <button
             onClick={handleCreate}
-            disabled={isGenerating || !name || !imageFile || !personality || !styleSamples || !memories || (useElevenLabs && (!elevenApiKey || !voiceSample))}
+            disabled={isGenerating || !name || !imageFile || !personality || !styleSamples || !memories || (useElevenLabs && !voiceSample)}
             className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold py-4 rounded-xl transition-all shadow-lg shadow-purple-900/20 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
         >
             {isGenerating ? (

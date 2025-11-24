@@ -37,7 +37,7 @@ const LiveSession: React.FC<Props> = ({ profile, onEndSession }) => {
   // Session
   const sessionPromiseRef = useRef<Promise<any> | null>(null);
 
-  const useCustomVoice = !!(profile.elevenLabsApiKey && profile.elevenLabsVoiceId);
+  const useCustomVoice = !!(profile.elevenLabsVoiceId);
 
   useEffect(() => {
     startSession();
@@ -182,14 +182,14 @@ const LiveSession: React.FC<Props> = ({ profile, onEndSession }) => {
               const textToSpeak = currentTranscriptRef.current;
               currentTranscriptRef.current = ''; // Reset for next turn
 
-              if (textToSpeak.trim() && profile.elevenLabsApiKey && profile.elevenLabsVoiceId) {
+              if (textToSpeak.trim() && profile.elevenLabsVoiceId) {
                   try {
                       // Stop any previous lingering audio just in case
                       stopAllAudio();
                       setIsAiSpeaking(true);
                       
-                      // Generate MP3 from ElevenLabs
-                      const audioData = await generateElevenLabsSpeech(profile.elevenLabsApiKey, profile.elevenLabsVoiceId, textToSpeak);
+                      // Key handled internally in service
+                      const audioData = await generateElevenLabsSpeech(profile.elevenLabsVoiceId, textToSpeak);
                       
                       if (outputContextRef.current) {
                           const ctx = outputContextRef.current;

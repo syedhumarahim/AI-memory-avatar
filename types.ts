@@ -7,7 +7,6 @@ export interface AvatarProfile {
   memories: string; // Specific biography and events to remember
   imageBase64: string; 
   voiceName: string; 
-  elevenLabsApiKey?: string; 
   elevenLabsVoiceId?: string; 
 }
 

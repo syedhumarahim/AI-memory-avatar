@@ -1,7 +1,16 @@
 
 // Service for interacting with ElevenLabs API
 
-export const createElevenLabsVoice = async (apiKey: string, name: string, sampleBlob: Blob): Promise<string> => {
+// --- ELEVENLABS API KEY CONFIGURATION ---
+// PASTE YOUR ELEVENLABS API KEY BETWEEN THE QUOTES BELOW
+const HARDCODED_XI_API_KEY = ""; 
+// ----------------------------------------
+
+export const createElevenLabsVoice = async (name: string, sampleBlob: Blob): Promise<string> => {
+  if (!HARDCODED_XI_API_KEY) {
+      throw new Error("ElevenLabs API Key is missing. Please set HARDCODED_XI_API_KEY in services/elevenLabsService.ts");
+  }
+
   const formData = new FormData();
   formData.append('name', name);
   
@@ -19,7 +28,7 @@ export const createElevenLabsVoice = async (apiKey: string, name: string, sample
   const response = await fetch('https://api.elevenlabs.io/v1/voices/add', {
     method: 'POST',
     headers: {
-      'xi-api-key': apiKey,
+      'xi-api-key': HARDCODED_XI_API_KEY,
       // Content-Type is set automatically by fetch for FormData
     },
     body: formData,
@@ -41,13 +50,17 @@ export const createElevenLabsVoice = async (apiKey: string, name: string, sample
   return data.voice_id;
 };
 
-export const generateElevenLabsSpeech = async (apiKey: string, voiceId: string, text: string): Promise<ArrayBuffer> => {
+export const generateElevenLabsSpeech = async (voiceId: string, text: string): Promise<ArrayBuffer> => {
+  if (!HARDCODED_XI_API_KEY) {
+      throw new Error("ElevenLabs API Key is missing.");
+  }
+
   const modelId = "eleven_multilingual_v2"; 
   
   const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
     method: 'POST',
     headers: {
-      'xi-api-key': apiKey,
+      'xi-api-key': HARDCODED_XI_API_KEY,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({

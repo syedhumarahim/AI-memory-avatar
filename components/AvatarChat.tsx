@@ -57,8 +57,9 @@ const AvatarChat: React.FC<Props> = ({ profile }) => {
       let audioBuffer: AudioBuffer;
 
       // 1. Check for ElevenLabs
-      if (profile.elevenLabsApiKey && profile.elevenLabsVoiceId) {
-          const mp3Data = await generateElevenLabsSpeech(profile.elevenLabsApiKey, profile.elevenLabsVoiceId, text);
+      if (profile.elevenLabsVoiceId) {
+          // Key is handled internally in service now
+          const mp3Data = await generateElevenLabsSpeech(profile.elevenLabsVoiceId, text);
           audioBuffer = await ctx.decodeAudioData(mp3Data); // Standard decode for MP3
       } else {
           // 2. Fallback to Gemini
