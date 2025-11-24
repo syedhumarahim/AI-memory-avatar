@@ -1,0 +1,8 @@
+{
+  "name": "Copy of PersonaAI Avatar",
+  "description": "Create a living AI avatar with memory, voice, and video animation.",
+  "requestFramePermissions": [
+    "microphone",
+    "camera"
+  ]
+}
