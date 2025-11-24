@@ -6,7 +6,7 @@ Loss is a profound human experience, and often we are left wishing for just one 
 
 ## System Architecture
 
-The application is built as a Single Page Application (SPA) using **React 19** and **TypeScript**, leveraging modern browser capabilities for real-time audio processing without a heavy backend server. The architecture consists of four main layers:
+Back to Life is implemented as a **browser-first Single Page Application (SPA)** using React 19 and TypeScript. All interaction, text, audio, and explainability, is orchestrated client-side with lightweight calls to external AI services. Conceptually, the system is organized into four cooperating layers:
 
 1.  **Presentation Layer (UI/UX)**:
     *   Built with React and Tailwind CSS.
@@ -23,6 +23,105 @@ The application is built as a Single Page Application (SPA) using **React 19** a
 
 4.  **Explainability Engine (Hybrid)**:
     *   A dedicated service that combines **Vector Embeddings** for mathematical scoring and **LLM Reasoning** for narrative explanation to provide transparency into the model's behavior.
+
+
+### 1. Presentation Layer (UI/UX)
+
+**Technologies:** React 19, TypeScript, Tailwind CSS  
+
+This layer owns the interactive experience:
+
+- **Views & Navigation**
+  - `App.tsx` coordinates the three main views via an `AppView` enum:
+    - **Creator** – `AvatarCreator` for building an `AvatarProfile` (name, personality, style samples, memories, image, voice).
+    - **Chat** – `AvatarChat` for multimodal conversation and per-message explainability.
+    - **Live Session** – `LiveSession` (stub) for future real-time voice calls.
+- **State Management**
+  - Avatar profile and messages are stored in React state (hooks) for immediate responsiveness.
+- **Explainability UI**
+  - The “Glass Box” panel is rendered inside `AvatarChat`, showing alignment scores and cognitive trace for each model response.
+
+### 2. Audio & Media Layer (Web Audio + Browser APIs)
+
+**Technologies:** Web Audio API, `MediaRecorder`, custom utils in `utils/audioUtils.ts`  
+
+This layer handles all audio capture, transformation, and playback in the browser:
+
+- **Input**
+  - Uses `MediaRecorder` to capture microphone audio as WebM/WAV.
+  - `blobToBase64` converts recordings into base64 so they can be sent directly to Gemini or ElevenLabs.
+- **Output**
+  - Raw audio bytes from Gemini TTS or ElevenLabs TTS are decoded via `AudioContext.decodeAudioData`.
+  - Audio playback is scheduled for smooth, gapless listening.
+- **Format Handling**
+  - Utility helpers manage base64 ↔ `Uint8Array` conversion and enforce the expected sample rate (e.g., 16 kHz).
+
+### 3. Intelligence Layer (AI Orchestration & Persona)
+
+**Technologies:** Google GenAI SDK (`@google/genai`), ElevenLabs API, `services/`  
+
+This layer turns user inputs and avatar profiles into conversational, voiced responses:
+
+- **Gemini Integration – `services/geminiService.ts`**
+  - `generateAvatarResponse(profile, userMessage)`
+    - Builds a **system prompt** using `buildSystemPrompt(profile)` (from `utils/promptUtils.ts`).
+    - Encodes the avatar’s **personality**, **memories**, and **style samples** into the model context.
+    - Uses `gemini-2.5-flash` as the conversational core.
+  - `transcribeAudio(audioBase64)`
+    - Sends inline audio to `gemini-2.5-flash` for speech-to-text.
+  - `generateSpeech(text)`
+    - Calls `gemini-2.5-flash-preview-tts` to synthesize voice for standard voices.
+  - `getEmbedding(text)`
+    - Uses `text-embedding-004` to obtain embeddings for explainability metrics.
+- **Voice Cloning – `services/elevenLabsService.ts`**
+  - `createElevenLabsVoice(name, sampleBlob)`
+    - Creates a custom voice using a short microphone recording.
+  - `generateElevenLabsSpeech(voiceId, text)`
+    - Synthesizes avatar responses using the cloned voice.
+- **Profile & Types – `types.ts`**
+  - `AvatarProfile` defines the complete configuration for an avatar (name, personality text, styleSamples, memories, image, voice settings).
+  - Shared types like `ExplanationAnalysis` and enums keep all data flows well-typed.
+
+> This layer is where **persona embodiment** happens: the model is instructed to speak *as* the defined memory avatar while respecting explicit safety and style constraints.
+
+### 4. Explainability Engine (Hybrid Scoring + Cognitive Trace)
+
+**Technologies:** `text-embedding-004`, `gemini-2.5-flash`, `ExplanationAnalysis`  
+
+This layer is responsible for making each response **inspectable and understandable**, rather than a black box.
+
+- **Core Function – `explainResponse(profile, userMessage, botResponse)`**
+  1. **Vector Embedding & Scoring**
+     - Embeds:
+       - The avatar’s **response text**
+       - The avatar’s **memories** (biographical text)
+       - The **style samples** (writing corpus)
+       - The **personality description**
+     - Computes cosine similarity between the response vector and each source vector.
+     - Normalizes these into 0–100 alignment scores:
+       - **Personality Score**
+       - **Memories Score**
+       - **Style Score**
+  2. **Narrative Explanation (“Cognitive Trace”)**
+     - Calls `gemini-2.5-flash` again with a **strict JSON schema** and the numeric scores:
+       - e.g., “The response had a Memory Vector Score of 82% and a Style Vector Score of 45%. Explain why.”
+     - The model returns:
+       - A short natural-language explanation of how the response relates to the provided memories and style.
+       - Any caveats (e.g., low style alignment).
+
+- **UI Presentation**
+  - `AvatarChat` renders:
+    - A per-message **Glass Box** showing the three scores.
+    - A concise explanation of *why* the avatar responded that way.
+
+> This hybrid design combines deterministic math (embeddings + cosine similarity) with constrained LLM reasoning, aligning directly with the course themes of **XAI** and **interpretable ML**: the model does not “grade itself” from scratch, it explains measured behavior.
+
+
+Together, these layers create a cohesive system where:
+- The **UI** collects inputs and presents the avatar.
+- The **Audio Layer** makes interaction multimodal.
+- The **Intelligence Layer** orchestrates Gemini + ElevenLabs into a consistent persona.
+- The **Explainability Engine** turns each response into a transparent, inspectable event — critical for responsible use in a sensitive domain like memory and loss.
 
 ## Deep Dive into Implementation
 

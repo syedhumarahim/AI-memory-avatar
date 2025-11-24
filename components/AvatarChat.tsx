@@ -86,6 +86,27 @@ const AvatarChat: React.FC<Props> = ({ profile }) => {
     } catch (e) {
       console.error("Audio playback error", e);
       setIsPlayingAudio(false);
+      
+      // Attempt fallback if ElevenLabs failed
+      if (profile.elevenLabsVoiceId) {
+          console.log("Falling back to Gemini TTS...");
+          try {
+             const pcmData = await generateSpeech(text, profile.voiceName);
+             if (audioContextRef.current) {
+                 const ctx = audioContextRef.current;
+                 const audioBuffer = await decodeAudioData(new Uint8Array(pcmData), ctx);
+                 const source = ctx.createBufferSource();
+                 source.buffer = audioBuffer;
+                 source.connect(ctx.destination);
+                 source.onended = () => setIsPlayingAudio(false);
+                 setIsPlayingAudio(true);
+                 source.start(0);
+                 audioSourceRef.current = source;
+             }
+          } catch (fallbackError) {
+             console.error("Fallback failed", fallbackError);
+          }
+      }
     }
   };
 
@@ -252,7 +273,7 @@ const AvatarChat: React.FC<Props> = ({ profile }) => {
                 <div className="max-w-[85%] w-full mt-3 bg-slate-950/80 border border-cyan-900/50 rounded-lg p-4 animate-in fade-in slide-in-from-top-2 backdrop-blur-sm">
                     <div className="flex justify-between items-start mb-3">
                         <h4 className="text-xs font-bold text-cyan-400 flex items-center gap-2 uppercase tracking-wider">
-                            <Activity size={14} /> Hybrid Analysis
+                            <Activity size={14} /> Interpreting the Output
                         </h4>
                         <span className="text-[10px] text-slate-500 border border-slate-800 px-2 py-0.5 rounded bg-slate-900 flex items-center gap-1">
                             <Calculator size={10} />
