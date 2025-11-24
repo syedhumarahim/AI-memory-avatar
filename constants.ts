@@ -1,7 +1,7 @@
+
 export const MODELS = {
-  TEXT: 'gemini-2.5-flash',
+  TEXT: 'gemini-2.5-flash', // Switched back to Flash for speed
   TTS: 'gemini-2.5-flash-preview-tts',
-  VEO_FAST: 'veo-3.1-fast-generate-preview', // For quick avatar generation
   LIVE: 'gemini-2.5-flash-native-audio-preview-09-2025',
   TRANSCRIPTION: 'gemini-2.5-flash',
 };

@@ -1,38 +1,41 @@
+
 import React, { useState, useRef, useEffect } from 'react';
-import { AvatarProfile } from '../types';
-import { generateAvatarResponse, generateSpeech, transcribeAudio } from '../services/geminiService';
+import { AvatarProfile, ExplanationAnalysis } from '../types';
+import { generateAvatarResponse, generateSpeech, transcribeAudio, explainResponse } from '../services/geminiService';
 import { generateElevenLabsSpeech } from '../services/elevenLabsService';
-import { blobToBase64 } from '../utils/audioUtils';
-import { Mic, Send, Volume2, StopCircle, Loader2, Sparkles, Zap } from 'lucide-react';
+import { blobToBase64, decodeAudioData } from '../utils/audioUtils';
+import { Mic, Send, StopCircle, Loader2, Sparkles, BrainCircuit, Activity, BookOpen, User } from 'lucide-react';
 
 interface Props {
   profile: AvatarProfile;
 }
 
+interface Message {
+  role: string;
+  text: string;
+  explanation?: ExplanationAnalysis;
+}
+
 const AvatarChat: React.FC<Props> = ({ profile }) => {
-  const [messages, setMessages] = useState<{ role: string; text: string }[]>([]);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
-  const scrollRef = useRef<HTMLDivElement>(null);
+  
+  // Explanation State
+  const [explainingIndex, setExplainingIndex] = useState<number | null>(null);
 
-  // Refs for audio handling
+  const scrollRef = useRef<HTMLDivElement>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const audioSourceRef = useRef<AudioBufferSourceNode | null>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
-  const animationFrameRef = useRef<number | null>(null);
-  
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
-
-  // Video Ref for controlling playback speed/looping
-  const videoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
     // Initial welcome message
     if (messages.length === 0) {
-      setMessages([{ role: 'model', text: `Hello, I am ${profile.name}.` }]);
+      setMessages([{ role: 'model', text: `Hello, I am ready to speak.` }]);
     }
   }, [profile.name]);
 
@@ -41,66 +44,27 @@ const AvatarChat: React.FC<Props> = ({ profile }) => {
     if (scrollRef.current) {
         scrollRef.current.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [messages]);
-
-  // Sync video playback to audio volume (Simulated Lip Sync)
-  const syncLipMovement = () => {
-    if (!analyserRef.current || !videoRef.current) return;
-
-    const bufferLength = analyserRef.current.frequencyBinCount;
-    const dataArray = new Uint8Array(bufferLength);
-    analyserRef.current.getByteFrequencyData(dataArray);
-
-    // Calculate average volume
-    let sum = 0;
-    for (let i = 0; i < bufferLength; i++) {
-        sum += dataArray[i];
-    }
-    const average = sum / bufferLength;
-
-    // Threshold for "talking"
-    // Adjust playback rate or play/pause based on volume
-    if (average > 10) { 
-        // Talking
-        if (videoRef.current.paused) {
-            videoRef.current.play().catch(() => {});
-        }
-        // Speed up video slightly on louder sounds for expressiveness
-        videoRef.current.playbackRate = 1.0 + (average / 255); 
-    } else {
-        // Silent / Pausing
-        if (!videoRef.current.paused) {
-             videoRef.current.pause();
-        }
-    }
-
-    animationFrameRef.current = requestAnimationFrame(syncLipMovement);
-  };
+  }, [messages, explainingIndex]);
 
   const playResponseAudio = async (text: string) => {
     try {
-      let audioData: ArrayBuffer;
-
-      // 1. Try ElevenLabs
-      if (profile.elevenLabsApiKey && profile.elevenLabsVoiceId) {
-         try {
-             audioData = await generateElevenLabsSpeech(profile.elevenLabsApiKey, profile.elevenLabsVoiceId, text);
-         } catch (e) {
-             console.error("ElevenLabs Failed, failing back to Gemini", e);
-             audioData = await generateSpeech(text, profile.voiceName);
-         }
-      } else {
-          // 2. Fallback to Gemini (with optional basic cloning if configured)
-          audioData = await generateSpeech(text, profile.voiceName, profile.voiceSampleBase64);
-      }
-      
       const AudioContextClass = window.AudioContext || window.webkitAudioContext;
       if (!audioContextRef.current) {
         audioContextRef.current = new AudioContextClass();
       }
       const ctx = audioContextRef.current;
       
-      const audioBuffer = await ctx.decodeAudioData(audioData);
+      let audioBuffer: AudioBuffer;
+
+      // 1. Check for ElevenLabs
+      if (profile.elevenLabsApiKey && profile.elevenLabsVoiceId) {
+          const mp3Data = await generateElevenLabsSpeech(profile.elevenLabsApiKey, profile.elevenLabsVoiceId, text);
+          audioBuffer = await ctx.decodeAudioData(mp3Data); // Standard decode for MP3
+      } else {
+          // 2. Fallback to Gemini
+          const pcmData = await generateSpeech(text, profile.voiceName);
+          audioBuffer = await decodeAudioData(new Uint8Array(pcmData), ctx);
+      }
       
       if (audioSourceRef.current) {
         audioSourceRef.current.stop();
@@ -108,32 +72,15 @@ const AvatarChat: React.FC<Props> = ({ profile }) => {
 
       const source = ctx.createBufferSource();
       source.buffer = audioBuffer;
-
-      // Setup Analyzer for Lip Sync
-      const analyser = ctx.createAnalyser();
-      analyser.fftSize = 256;
-      analyserRef.current = analyser;
-
-      source.connect(analyser);
-      analyser.connect(ctx.destination);
+      source.connect(ctx.destination);
       
       source.onended = () => {
         setIsPlayingAudio(false);
-        if (animationFrameRef.current) {
-            cancelAnimationFrame(animationFrameRef.current);
-        }
-        if (videoRef.current) {
-            videoRef.current.pause();
-            videoRef.current.currentTime = 0; // Return to start/neutral frame
-        }
       };
 
       setIsPlayingAudio(true);
       source.start(0);
       audioSourceRef.current = source;
-      
-      // Start Sync Loop
-      syncLipMovement();
 
     } catch (e) {
       console.error("Audio playback error", e);
@@ -152,12 +99,12 @@ const AvatarChat: React.FC<Props> = ({ profile }) => {
     setIsProcessing(true);
 
     try {
-      // 1. Get Text Response
-      const responseText = await generateAvatarResponse(profile.memory, textToProcess, messages);
+      // 1. Get Text Response - passing full profile for the system prompt
+      const responseText = await generateAvatarResponse(profile, textToProcess, messages);
       
       setMessages(prev => [...prev, { role: 'model', text: responseText }]);
 
-      // 2. Play Audio (which triggers video animation via sync)
+      // 2. Play Audio 
       await playResponseAudio(responseText);
 
     } catch (error) {
@@ -166,6 +113,35 @@ const AvatarChat: React.FC<Props> = ({ profile }) => {
     } finally {
       setIsProcessing(false);
     }
+  };
+
+  // --- Explainability Logic ---
+  const handleExplain = async (index: number) => {
+      // If already open, close it
+      if (explainingIndex === index) {
+          setExplainingIndex(null);
+          return;
+      }
+
+      const msg = messages[index];
+      // If we already have the explanation, just open it
+      if (msg.explanation) {
+          setExplainingIndex(index);
+          return;
+      }
+
+      // Generate explanation
+      setExplainingIndex(index); // Open loading view
+      const userMsg = messages[index - 1]?.text || "Context unavailable";
+      
+      try {
+          const analysis = await explainResponse(profile, userMsg, msg.text);
+          const updatedMessages = [...messages];
+          updatedMessages[index].explanation = analysis;
+          setMessages(updatedMessages);
+      } catch (e) {
+          console.error("Explanation failed", e);
+      }
   };
 
   // --- Audio Recording Logic ---
@@ -211,70 +187,101 @@ const AvatarChat: React.FC<Props> = ({ profile }) => {
     }
   };
 
+  const renderExplanationBar = (label: string, score: number, colorClass: string, icon: React.ReactNode) => (
+      <div className="mb-2">
+          <div className="flex justify-between text-xs text-slate-400 mb-1">
+              <span className="flex items-center gap-1">{icon} {label}</span>
+              <span>{score}%</span>
+          </div>
+          <div className="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden">
+              <div 
+                  className={`h-full rounded-full transition-all duration-1000 ${colorClass}`} 
+                  style={{ width: `${score}%` }}
+              />
+          </div>
+      </div>
+  );
+
   return (
     <div className="flex flex-col h-full bg-slate-900 rounded-xl overflow-hidden border border-slate-700 shadow-2xl relative">
       
-      {/* Header Area with Smaller Video */}
+      {/* Header Area */}
       <div className="flex items-center gap-4 p-4 border-b border-slate-800 bg-slate-800/50">
-        <div className="relative w-20 h-20 md:w-24 md:h-24 flex-shrink-0">
-             <div className="absolute inset-0 rounded-full border-2 border-slate-600 overflow-hidden bg-black shadow-lg">
-                {profile.videoUrl ? (
-                <video 
-                    ref={videoRef}
-                    src={profile.videoUrl} 
-                    loop 
-                    muted 
-                    playsInline
-                    className="h-full w-full object-cover transform scale-125" // Scale up slightly to focus on face/mouth
-                />
-                ) : (
+        <div className="relative w-16 h-16 flex-shrink-0">
+             <div className={`absolute inset-0 rounded-full border-2 overflow-hidden bg-black shadow-lg ${isPlayingAudio ? 'border-green-400 shadow-green-400/30' : 'border-slate-600'}`}>
                 <img src={`data:image/png;base64,${profile.imageBase64}`} className="h-full w-full object-cover" alt="Avatar" />
-                )}
              </div>
-             {isPlayingAudio && (
-                 <div className="absolute -bottom-1 -right-1 bg-green-500 rounded-full p-1 border-2 border-slate-800 animate-pulse">
-                     <Volume2 size={12} className="text-white" />
-                 </div>
-             )}
         </div>
         
         <div className="flex-1">
              <h3 className="text-xl font-bold text-white flex items-center gap-2">
                  {profile.name}
                  <span className="px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 text-xs border border-purple-500/30">AI Persona</span>
-                 {profile.elevenLabsVoiceId ? (
-                     <span className="px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 text-xs border border-indigo-500/30 flex items-center gap-1">
-                        <Zap size={10} /> ElevenLabs Voice
-                     </span>
-                 ) : profile.voiceSampleBase64 ? (
-                     <span className="px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 text-xs border border-blue-500/30 flex items-center gap-1">
-                        <Sparkles size={10} /> Gemini Mimic
-                     </span>
-                 ) : null}
              </h3>
-             <p className="text-sm text-slate-400 line-clamp-1">{profile.memory.substring(0, 60)}...</p>
+             <p className="text-sm text-slate-400 line-clamp-1">{profile.styleSamples.substring(0, 60)}...</p>
         </div>
       </div>
 
       {/* Main Chat Area */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-900/50 scroll-smooth">
+      <div className="flex-1 overflow-y-auto p-4 space-y-6 bg-slate-900/50 scroll-smooth">
         {messages.map((m, idx) => (
-          <div key={idx} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-            <div className={`max-w-[85%] rounded-2xl px-5 py-3 text-sm leading-relaxed ${
+          <div key={idx} className={`flex flex-col ${m.role === 'user' ? 'items-end' : 'items-start'}`}>
+            <div className={`max-w-[85%] rounded-2xl px-5 py-3 text-sm leading-relaxed relative group ${
               m.role === 'user' 
                 ? 'bg-purple-600 text-white rounded-br-none shadow-md shadow-purple-900/20' 
                 : m.role === 'error' ? 'bg-red-900/50 text-red-200'
                 : 'bg-slate-700 text-slate-200 rounded-bl-none shadow-md'
             }`}>
               {m.text}
+
+              {/* Explainability Button (Only for Model) */}
+              {m.role === 'model' && (
+                  <button 
+                    onClick={() => handleExplain(idx)}
+                    className="absolute -right-12 top-1/2 -translate-y-1/2 p-2 text-slate-500 hover:text-cyan-400 transition-colors opacity-0 group-hover:opacity-100"
+                    title="Explain Decision Logic"
+                  >
+                      <BrainCircuit size={20} />
+                  </button>
+              )}
             </div>
+
+            {/* Explainability Dashboard */}
+            {explainingIndex === idx && m.role === 'model' && (
+                <div className="max-w-[85%] w-full mt-3 bg-slate-950/80 border border-cyan-900/50 rounded-lg p-4 animate-in fade-in slide-in-from-top-2 backdrop-blur-sm">
+                    <h4 className="text-xs font-bold text-cyan-400 mb-3 flex items-center gap-2 uppercase tracking-wider">
+                        <Activity size={14} /> Cognitive Decision Map
+                    </h4>
+                    
+                    {!m.explanation ? (
+                         <div className="flex items-center gap-2 text-slate-500 text-xs h-16">
+                            <Loader2 className="animate-spin text-cyan-500" size={14} />
+                            Analyzing prompt influence weights...
+                         </div>
+                    ) : (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div className="space-y-1">
+                                {renderExplanationBar('Personality Trait Influence', m.explanation.personalityScore, 'bg-yellow-500', <User size={12}/>)}
+                                {renderExplanationBar('Memory Retrieval', m.explanation.memoriesScore, 'bg-green-500', <BookOpen size={12}/>)}
+                                {renderExplanationBar('Writing Style Match', m.explanation.styleScore, 'bg-blue-500', <Sparkles size={12}/>)}
+                            </div>
+                            <div className="bg-slate-900/50 rounded p-3 border border-slate-800">
+                                <span className="text-xs text-slate-500 font-mono block mb-1">REASONING TRACE:</span>
+                                <p className="text-xs text-slate-300 italic">
+                                    "{m.explanation.reasoning}"
+                                </p>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            )}
           </div>
         ))}
         {isProcessing && (
             <div className="flex justify-start">
                  <div className="bg-slate-800/50 rounded-2xl px-4 py-3 flex items-center gap-2 text-slate-400 text-xs">
                      <Sparkles size={14} className="animate-spin text-purple-400"/>
-                     <span>Thinking & Generating Speech...</span>
+                     <span>Thinking...</span>
                  </div>
             </div>
         )}

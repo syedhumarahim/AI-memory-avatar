@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { AppView, AvatarProfile } from './types';
 import AvatarCreator from './components/AvatarCreator';
@@ -52,6 +53,9 @@ const App: React.FC = () => {
         >
           <Zap size={24} />
         </button>
+
+        {/* Spacer to push bottom items down on desktop */}
+        <div className="hidden md:block md:flex-1" />
       </nav>
 
       {/* Main Content Area */}

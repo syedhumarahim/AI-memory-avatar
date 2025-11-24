@@ -34,6 +34,8 @@ export function bytesToBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
+// Restored name from pcmToAudioBuffer to decodeAudioData for consistency
+// Note: This specifically handles Raw PCM 16-bit data, not generic audio files
 export async function decodeAudioData(
   data: Uint8Array,
   ctx: AudioContext,

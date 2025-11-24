@@ -1,17 +1,21 @@
+
 export interface AvatarProfile {
   id: string;
   name: string;
-  memory: string; // The text description/persona
-  imageBase64: string; // The original image
-  videoUrl?: string; // The Veo generated video loop
-  voiceName: string; // The selected Gemini TTS voice (fallback)
-  
-  // ElevenLabs Configuration
-  elevenLabsApiKey?: string;
+  personality: string; // Traits like "Warmth: High", "Humor: Low"
+  styleSamples: string; // The source text/writings to mimic
+  memories: string; // Specific biography and events to remember
+  imageBase64: string; 
+  voiceName: string; 
+  elevenLabsApiKey?: string; 
   elevenLabsVoiceId?: string; 
-  
-  // Legacy/Fallback Gemini Cloning
-  voiceSampleBase64?: string; 
+}
+
+export interface ExplanationAnalysis {
+  personalityScore: number;
+  memoriesScore: number;
+  styleScore: number;
+  reasoning: string;
 }
 
 export enum AppView {

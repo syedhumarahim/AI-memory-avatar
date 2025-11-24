@@ -1,10 +1,12 @@
 
 import React, { useEffect, useRef, useState } from 'react';
+import { GoogleGenAI, LiveServerMessage, Modality } from "@google/genai";
 import { AvatarProfile } from '../types';
-import { blobToBase64 } from '../utils/audioUtils';
-import { generateAvatarResponse, transcribeAudio, generateSpeech } from '../services/geminiService';
+import { createPcmBlob, decodeAudioData } from '../utils/audioUtils';
 import { generateElevenLabsSpeech } from '../services/elevenLabsService';
-import { Mic, MicOff, PhoneOff, Volume2, Activity, AlertCircle } from 'lucide-react';
+import { MODELS, AUDIO_SAMPLE_RATE_INPUT, AUDIO_SAMPLE_RATE_OUTPUT } from '../constants';
+import { buildSystemPrompt } from '../utils/promptUtils';
+import { Mic, MicOff, PhoneOff, Radio, Zap } from 'lucide-react';
 
 interface Props {
   profile: AvatarProfile;
@@ -14,36 +16,28 @@ interface Props {
 const LiveSession: React.FC<Props> = ({ profile, onEndSession }) => {
   const [micActive, setMicActive] = useState(true);
   const [status, setStatus] = useState<string>('Initializing...');
-  const [isTalking, setIsTalking] = useState(false);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [history, setHistory] = useState<{ role: string; text: string }[]>([]);
+  const [isAiSpeaking, setIsAiSpeaking] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [volumeLevel, setVolumeLevel] = useState(0);
 
-  // Audio Contexts
+  // Audio Contexts & State
   const inputContextRef = useRef<AudioContext | null>(null);
   const outputContextRef = useRef<AudioContext | null>(null);
-  
-  // Recording & VAD
   const streamRef = useRef<MediaStream | null>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
   const processorRef = useRef<ScriptProcessorNode | null>(null);
   const sourceNodeRef = useRef<MediaStreamAudioSourceNode | null>(null);
   
-  // VAD State
-  const lastSpeechTimeRef = useRef<number>(Date.now());
-  const isUserSpeakingRef = useRef<boolean>(false);
-  const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
+  // Audio Scheduling
+  const nextStartTimeRef = useRef<number>(0);
+  const audioSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
 
-  // Playback
-  const analyserRef = useRef<AnalyserNode | null>(null);
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const currentSourceRef = useRef<AudioBufferSourceNode | null>(null);
-  const animationFrameRef = useRef<number | null>(null);
+  // Transcription Accumulator for ElevenLabs
+  const currentTranscriptRef = useRef<string>('');
 
-  // Constants
-  const VAD_THRESHOLD = 0.02; // Adjust for sensitivity
-  const SILENCE_DURATION = 2000; // Increased to 2s to reduce rate limits (429)
+  // Session
+  const sessionPromiseRef = useRef<Promise<any> | null>(null);
+
+  const useCustomVoice = !!(profile.elevenLabsApiKey && profile.elevenLabsVoiceId);
 
   useEffect(() => {
     startSession();
@@ -52,382 +46,323 @@ const LiveSession: React.FC<Props> = ({ profile, onEndSession }) => {
   }, []);
 
   const cleanup = () => {
-    stopRecording();
     if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => track.stop());
     }
+    
     if (inputContextRef.current && inputContextRef.current.state !== 'closed') {
         inputContextRef.current.close();
     }
     if (outputContextRef.current && outputContextRef.current.state !== 'closed') {
         outputContextRef.current.close();
     }
-    if (processorRef.current) processorRef.current.disconnect();
+    
+    if (processorRef.current) {
+        processorRef.current.disconnect();
+        processorRef.current.onaudioprocess = null;
+    }
     if (sourceNodeRef.current) sourceNodeRef.current.disconnect();
-    if (currentSourceRef.current) currentSourceRef.current.stop();
-    if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
-    if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+    
+    stopAllAudio();
+  };
+
+  const stopAllAudio = () => {
+     audioSourcesRef.current.forEach(source => {
+         try { source.stop(); } catch(e) {}
+     });
+     audioSourcesRef.current.clear();
+     setIsAiSpeaking(false);
+     nextStartTimeRef.current = 0;
   };
 
   const startSession = async () => {
     try {
-      setStatus('Accessing microphone...');
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      streamRef.current = stream;
-
+      setStatus('Connecting to Gemini Live...');
+      
       const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-      inputContextRef.current = new AudioContextClass();
-      outputContextRef.current = new AudioContextClass();
+      inputContextRef.current = new AudioContextClass({ sampleRate: AUDIO_SAMPLE_RATE_INPUT });
+      outputContextRef.current = new AudioContextClass({ sampleRate: AUDIO_SAMPLE_RATE_OUTPUT });
+      
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      
+      // Build the new strict system prompt
+      const systemInstruction = buildSystemPrompt(profile);
 
-      // Setup Playback Analyser (Lip Sync)
-      analyserRef.current = outputContextRef.current.createAnalyser();
-      analyserRef.current.fftSize = 256;
-      syncLipMovement();
+      sessionPromiseRef.current = ai.live.connect({
+        model: MODELS.LIVE,
+        config: {
+            systemInstruction: systemInstruction,
+            responseModalities: [Modality.AUDIO],
+            // Enable output transcription to get text for ElevenLabs
+            outputAudioTranscription: {}, 
+            speechConfig: {
+                voiceConfig: { prebuiltVoiceConfig: { voiceName: profile.voiceName || 'Kore' }}
+            }
+        },
+        callbacks: {
+            onopen: async () => {
+                setStatus('Connected');
+                await startMicrophone();
+            },
+            onmessage: handleMessage,
+            onclose: () => {
+                setStatus('Disconnected');
+                console.log('Session closed');
+            },
+            onerror: (e) => {
+                console.error('Session error', e);
+                setError('Connection error');
+                setStatus('Error');
+            }
+        }
+      });
 
-      // Setup VAD & Recording
-      setupVAD(stream);
-      startRecordingChunk();
-
-      setStatus('Listening...');
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
-      setError("Could not access microphone.");
+      setError(e.message || "Failed to start session");
       setStatus('Error');
     }
   };
 
-  // --- RECORDING & VAD LOGIC ---
+  const startMicrophone = async () => {
+     if (!inputContextRef.current) return;
+     
+     try {
+         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+         streamRef.current = stream;
+         
+         const ctx = inputContextRef.current;
+         const source = ctx.createMediaStreamSource(stream);
+         const processor = ctx.createScriptProcessor(4096, 1, 1);
+         
+         processor.onaudioprocess = (e) => {
+             if (!micActive) return;
+             
+             const inputData = e.inputBuffer.getChannelData(0);
+             updateVolumeVisualizer(inputData);
 
-  const setupVAD = (stream: MediaStream) => {
-    if (!inputContextRef.current) return;
-    const ctx = inputContextRef.current;
-    
-    const source = ctx.createMediaStreamSource(stream);
-    const processor = ctx.createScriptProcessor(2048, 1, 1);
-    
-    source.connect(processor);
-    processor.connect(ctx.destination);
-    
-    sourceNodeRef.current = source;
-    processorRef.current = processor;
+             const pcmBlob = createPcmBlob(inputData);
+             if (sessionPromiseRef.current) {
+                 sessionPromiseRef.current.then(session => {
+                     session.sendRealtimeInput({ media: pcmBlob });
+                 });
+             }
+         };
 
-    processor.onaudioprocess = (e) => {
-      if (!micActive || isProcessing) return;
-
-      const input = e.inputBuffer.getChannelData(0);
-      let sum = 0;
-      for (let i = 0; i < input.length; i++) {
-        sum += input[i] * input[i];
-      }
-      const rms = Math.sqrt(sum / input.length);
-
-      if (rms > VAD_THRESHOLD) {
-        // User is speaking
-        if (!isUserSpeakingRef.current) {
-            // User just started speaking: Barge-in!
-            stopAudioPlayback(); 
-            // console.log("Speech detected");
-        }
-        isUserSpeakingRef.current = true;
-        lastSpeechTimeRef.current = Date.now();
-        
-        // Clear existing silence timer
-        if (silenceTimerRef.current) {
-            clearTimeout(silenceTimerRef.current);
-            silenceTimerRef.current = null;
-        }
-      } else {
-        // Silence
-        if (isUserSpeakingRef.current) {
-            // check how long we've been silent
-            const timeSinceSpeech = Date.now() - lastSpeechTimeRef.current;
-            
-            if (timeSinceSpeech > SILENCE_DURATION && !silenceTimerRef.current) {
-                 // Trigger processing after silence duration
-                 silenceTimerRef.current = setTimeout(() => {
-                     processUserSpeech();
-                 }, 100); 
-            }
-        }
-      }
-    };
+         source.connect(processor);
+         processor.connect(ctx.destination);
+         
+         sourceNodeRef.current = source;
+         processorRef.current = processor;
+         
+     } catch (e) {
+         console.error("Mic Error", e);
+         setError("Microphone access denied");
+     }
   };
 
-  const startRecordingChunk = () => {
-      if (!streamRef.current) return;
-      try {
-        const recorder = new MediaRecorder(streamRef.current);
-        mediaRecorderRef.current = recorder;
-        audioChunksRef.current = [];
-
-        recorder.ondataavailable = (e) => {
-            if (e.data.size > 0) audioChunksRef.current.push(e.data);
-        };
-
-        recorder.start();
-      } catch (e) {
-          console.error("Recorder start failed", e);
-      }
-  };
-
-  const stopRecording = () => {
-      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-          mediaRecorderRef.current.stop();
-      }
-  };
-
-  // --- PROCESSING PIPELINE ---
-
-  const processUserSpeech = async () => {
-      if (!mediaRecorderRef.current || isProcessing) return;
-      
-      // Reset VAD flags immediately
-      isUserSpeakingRef.current = false;
-      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
-
-      // Stop current recorder to get the blob
-      mediaRecorderRef.current.requestData();
-      mediaRecorderRef.current.stop();
-      
-      setIsProcessing(true);
-      setStatus('Thinking...');
-
-      // Wait a tick for dataavailable to fire
-      await new Promise(r => setTimeout(r, 100));
-
-      // 50KB minimum to avoid processing silence/noise (Fixes 429 by reducing calls)
-      const MIN_BLOB_SIZE = 10000; 
-      const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-      
-      // Start recording next chunk immediately to avoid cutting off start of next sentence
-      startRecordingChunk();
-
-      if (blob.size < MIN_BLOB_SIZE) {
-          setIsProcessing(false);
-          setStatus('Listening...');
+  const handleMessage = async (message: LiveServerMessage) => {
+      // Handle Interruption
+      if (message.serverContent?.interrupted) {
+          console.log("Interrupted!");
+          stopAllAudio();
+          currentTranscriptRef.current = ''; 
           return;
       }
 
-      try {
-          const base64Audio = await blobToBase64(blob);
-          
-          // 1. Transcribe (Gemini 2.5 Flash)
-          // Explicitly pass mimeType for webm to ensure accurate transcription
-          const transcription = await transcribeAudio(base64Audio, 'audio/webm');
-          
-          if (!transcription || transcription.trim().length < 2) {
-              console.log("Empty transcription, ignoring");
-              setIsProcessing(false);
-              setStatus('Listening...');
-              return;
+      // --- Path A: Custom ElevenLabs Voice ---
+      if (useCustomVoice) {
+          // 1. Accumulate Text
+          if (message.serverContent?.outputTranscription?.text) {
+              currentTranscriptRef.current += message.serverContent.outputTranscription.text;
           }
-          console.log("User said:", transcription);
 
-          // 2. Generate Response (Gemini 2.5 Flash Text Model)
-          const newHistory = [...history, { role: 'user', text: transcription }];
-          setHistory(newHistory);
-          
-          const responseText = await generateAvatarResponse(profile.memory, transcription, history);
-          console.log("AI Response:", responseText);
-          
-          setHistory(prev => [...prev, { role: 'model', text: responseText }]);
-          setStatus('Speaking...');
+          // 2. On Turn Complete -> Generate & Play
+          if (message.serverContent?.turnComplete) {
+              const textToSpeak = currentTranscriptRef.current;
+              currentTranscriptRef.current = ''; // Reset for next turn
 
-          // 3. Generate Audio (ElevenLabs or Fallback) & Play
-          await playResponse(responseText);
+              if (textToSpeak.trim() && profile.elevenLabsApiKey && profile.elevenLabsVoiceId) {
+                  try {
+                      // Stop any previous lingering audio just in case
+                      stopAllAudio();
+                      setIsAiSpeaking(true);
+                      
+                      // Generate MP3 from ElevenLabs
+                      const audioData = await generateElevenLabsSpeech(profile.elevenLabsApiKey, profile.elevenLabsVoiceId, textToSpeak);
+                      
+                      if (outputContextRef.current) {
+                          const ctx = outputContextRef.current;
+                          // Standard browser decode for MP3/WAV
+                          const audioBuffer = await ctx.decodeAudioData(audioData);
+                          
+                          const source = ctx.createBufferSource();
+                          source.buffer = audioBuffer;
+                          source.connect(ctx.destination);
+                          
+                          source.onended = () => {
+                              audioSourcesRef.current.delete(source);
+                              setIsAiSpeaking(false);
+                          };
 
-      } catch (e: any) {
-          console.error("Pipeline Error", e);
-          if (e.message?.includes("429") || e.status === 429) {
-              setStatus("Rate limited. Waiting...");
-              await new Promise(r => setTimeout(r, 3000));
-          } else {
-              setStatus("Error processing speech.");
+                          source.start(0);
+                          audioSourcesRef.current.add(source);
+                      }
+                  } catch (err) {
+                      console.error("ElevenLabs Playback Error:", err);
+                      setIsAiSpeaking(false);
+                  }
+              }
           }
-      } finally {
-          setIsProcessing(false);
-          if (micActive) setStatus('Listening...');
+          // Return early to ignore Native Audio bytes
+          return;
+      }
+
+      // --- Path B: Native Gemini Audio (Low Latency) ---
+      const base64Audio = message.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
+      if (base64Audio && outputContextRef.current) {
+          const ctx = outputContextRef.current;
+          
+          try {
+             const rawBytes = atob(base64Audio);
+             const len = rawBytes.length;
+             const bytes = new Uint8Array(len);
+             for(let i=0; i<len; i++) bytes[i] = rawBytes.charCodeAt(i);
+             
+             const audioBuffer = await decodeAudioData(bytes, ctx, AUDIO_SAMPLE_RATE_OUTPUT);
+             
+             nextStartTimeRef.current = Math.max(nextStartTimeRef.current, ctx.currentTime);
+             
+             const source = ctx.createBufferSource();
+             source.buffer = audioBuffer;
+             source.connect(ctx.destination);
+             
+             source.onended = () => {
+                 audioSourcesRef.current.delete(source);
+                 if (audioSourcesRef.current.size === 0) {
+                     setIsAiSpeaking(false);
+                 }
+             };
+
+             source.start(nextStartTimeRef.current);
+             nextStartTimeRef.current += audioBuffer.duration;
+             
+             audioSourcesRef.current.add(source);
+             setIsAiSpeaking(true);
+
+          } catch (e) {
+              console.error("Audio Decode Error", e);
+          }
       }
   };
 
-  // --- AUDIO OUTPUT & LIP SYNC ---
-
-  const playResponse = async (text: string) => {
-      if (!outputContextRef.current) return;
-      
-      try {
-          let audioBuffer: AudioBuffer | null = null;
-
-          // Attempt ElevenLabs if configured (User Preference)
-          if (profile.elevenLabsApiKey && profile.elevenLabsVoiceId) {
-             try {
-                const arrayBuffer = await generateElevenLabsSpeech(profile.elevenLabsApiKey, profile.elevenLabsVoiceId, text);
-                audioBuffer = await outputContextRef.current.decodeAudioData(arrayBuffer);
-             } catch (e) {
-                 console.warn("ElevenLabs failed, using fallback", e);
-             }
-          } 
-          
-          // Fallback to Gemini TTS if ElevenLabs failed or not configured
-          if (!audioBuffer) {
-             const bufferData = await generateSpeech(text, profile.voiceName);
-             audioBuffer = await outputContextRef.current.decodeAudioData(bufferData);
-          }
-
-          if (audioBuffer) {
-              playAudioBuffer(audioBuffer);
-          }
-      } catch (e) {
-          console.error("Audio generation failed", e);
-          setStatus('Audio Error');
+  const updateVolumeVisualizer = (data: Float32Array) => {
+      let sum = 0;
+      for (let i = 0; i < data.length; i += 50) {
+          sum += Math.abs(data[i]);
       }
+      const avg = sum / (data.length / 50);
+      setVolumeLevel(prev => prev * 0.8 + avg * 20); 
   };
 
-  const playAudioBuffer = (buffer: AudioBuffer) => {
-      if (!outputContextRef.current) return;
-      const ctx = outputContextRef.current;
-      
-      stopAudioPlayback(); // Ensure no overlap
-
-      const source = ctx.createBufferSource();
-      source.buffer = buffer;
-      
-      if (analyserRef.current) {
-          source.connect(analyserRef.current);
-          analyserRef.current.connect(ctx.destination);
-      } else {
-          source.connect(ctx.destination);
-      }
-
-      source.onended = () => {
-          setStatus('Listening...');
-          setIsTalking(false);
-          if (videoRef.current) {
-             videoRef.current.pause();
-             videoRef.current.currentTime = 0;
-          }
-      };
-
-      source.start(0);
-      currentSourceRef.current = source;
+  const toggleMic = () => {
+      setMicActive(!micActive);
   };
-
-  const stopAudioPlayback = () => {
-      if (currentSourceRef.current) {
-          try { currentSourceRef.current.stop(); } catch(e) {}
-          currentSourceRef.current = null;
-      }
-      setIsTalking(false);
-      if (videoRef.current) videoRef.current.pause();
-  };
-
-  const syncLipMovement = () => {
-    if (analyserRef.current && videoRef.current && !videoRef.current.error) {
-        const bufferLength = analyserRef.current.frequencyBinCount;
-        const dataArray = new Uint8Array(bufferLength);
-        analyserRef.current.getByteFrequencyData(dataArray);
-
-        let sum = 0;
-        for (let i = 0; i < bufferLength; i++) {
-            sum += dataArray[i];
-        }
-        const average = sum / bufferLength;
-
-        if (average > 10) { // Lip sync threshold
-            setIsTalking(true);
-            // Safely attempt play
-            const playPromise = videoRef.current.play();
-            if (playPromise !== undefined) {
-                playPromise.catch(error => {
-                    // Auto-play was prevented or source is invalid
-                    // console.warn("Video play interrupted", error);
-                });
-            }
-            videoRef.current.playbackRate = 1.0 + (average / 300); 
-        } else {
-            setIsTalking(false);
-            if (!videoRef.current.paused) {
-                videoRef.current.pause();
-            }
-        }
-    }
-    animationFrameRef.current = requestAnimationFrame(syncLipMovement);
-  };
-
-  // --- RENDER ---
 
   return (
-    <div className="flex flex-col items-center justify-center h-full bg-slate-900 rounded-xl relative overflow-hidden border border-slate-700 p-4">
+    <div className="flex flex-col h-full bg-slate-950 rounded-xl overflow-hidden relative shadow-2xl border border-slate-800">
+      
+      {/* Visualizer Area */}
+      <div className="flex-1 relative flex flex-col items-center justify-center p-8 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-slate-900 via-slate-950 to-black">
         
-        {/* Video Avatar */}
-        <div className="relative w-full max-w-sm aspect-[9/16] bg-black rounded-2xl overflow-hidden shadow-2xl ring-1 ring-slate-700 mb-6">
-            {profile.videoUrl ? (
-                <video 
-                    ref={videoRef}
-                    src={profile.videoUrl} 
-                    loop 
-                    muted 
-                    playsInline
-                    className="w-full h-full object-cover"
-                    onError={() => console.warn("Video failed to load")}
-                />
-            ) : (
-                <img 
-                    src={`data:image/png;base64,${profile.imageBase64}`} 
-                    className="w-full h-full object-cover" 
-                    alt="Avatar" 
-                />
-            )}
-            
-            {/* Status Overlays */}
-            <div className="absolute top-4 left-4 right-4 flex justify-between items-start">
-                 <div className={`px-3 py-1 rounded-full border flex items-center gap-2 backdrop-blur-md transition-colors ${
-                     isProcessing ? 'bg-purple-500/80 border-purple-400 text-white' : 
-                     status === 'Listening...' ? 'bg-green-500/80 border-green-400 text-white' : 
-                     'bg-black/50 border-white/10 text-slate-300'
-                 }`}>
-                     <Activity size={12} className={status === 'Listening...' ? 'animate-pulse' : ''} />
-                     <span className="text-xs font-medium">{status}</span>
-                 </div>
-
-                 {isTalking && (
-                     <div className="px-2 py-1 bg-indigo-500/80 rounded-full animate-bounce">
-                         <Volume2 size={12} className="text-white" />
-                     </div>
-                 )}
-            </div>
+        {/* Connection Status Indicator */}
+        <div className="absolute top-4 right-4 flex items-center gap-2 px-3 py-1 rounded-full bg-slate-900/50 border border-slate-700 backdrop-blur-sm">
+            <div className={`w-2 h-2 rounded-full ${status === 'Connected' ? 'bg-green-500 animate-pulse' : 'bg-yellow-500'}`} />
+            <span className="text-xs text-slate-400 font-medium uppercase tracking-wider">{status}</span>
         </div>
 
-        {/* Controls */}
-        <div className="text-center w-full max-w-md space-y-4">
-            <div>
-                <h2 className="text-2xl font-bold text-white mb-1">{profile.name}</h2>
-                <p className="text-slate-400 text-xs uppercase tracking-wider font-medium">Live Persona Interface</p>
-            </div>
-            
-            {error && (
-                <div className="flex items-center justify-center gap-2 text-red-400 bg-red-900/20 p-2 rounded-lg text-sm">
-                    <AlertCircle size={16} />
-                    {error}
+        {/* Main Avatar */}
+        <div className="relative group">
+            {/* Ripples */}
+            {isAiSpeaking && (
+                <>
+                    <div className="absolute inset-0 rounded-full border border-purple-500/50 opacity-0 animate-[ping_2s_linear_infinite]" />
+                    <div className="absolute inset-0 rounded-full border border-indigo-500/50 opacity-0 animate-[ping_2s_linear_infinite_0.5s]" />
+                    <div className="absolute -inset-4 rounded-full bg-purple-500/10 blur-xl animate-pulse" />
+                </>
+            )}
+
+            <div className={`relative z-10 w-48 h-48 md:w-72 md:h-72 rounded-full p-1.5 transition-all duration-300 ${isAiSpeaking ? 'scale-105' : 'scale-100'}`}>
+                <div className={`absolute inset-0 rounded-full bg-gradient-to-r from-purple-600 to-blue-600 animate-spin-slow opacity-0 ${isAiSpeaking ? 'opacity-100' : ''}`} />
+                <div className="absolute inset-[3px] rounded-full bg-slate-950 z-10" />
+                
+                <div className={`relative z-20 w-full h-full rounded-full overflow-hidden border-4 transition-colors duration-300 ${isAiSpeaking ? 'border-transparent' : 'border-slate-800'}`}>
+                    <img 
+                        src={`data:image/png;base64,${profile.imageBase64}`} 
+                        className="h-full w-full object-cover" 
+                        alt="Avatar" 
+                    />
                 </div>
-            )}
-            
-            <div className="flex justify-center gap-6 mt-4">
-                 <button 
-                    onClick={() => setMicActive(!micActive)}
-                    className={`p-4 rounded-full transition-all transform hover:scale-105 shadow-lg border ${micActive ? 'bg-slate-800 text-white border-slate-600 hover:bg-slate-700' : 'bg-red-500/20 text-red-400 border-red-500'}`}
-                >
-                    {micActive ? <Mic size={24} /> : <MicOff size={24} />}
-                </button>
-
-                <button 
-                    onClick={onEndSession}
-                    className="p-4 rounded-full bg-red-600 text-white hover:bg-red-500 transition-all transform hover:scale-105 shadow-lg shadow-red-900/30 border border-red-500"
-                >
-                    <PhoneOff size={24} />
-                </button>
             </div>
         </div>
+
+        {/* Live Audio Visualizer Bar */}
+        <div className="mt-12 h-16 flex items-center justify-center gap-1.5 w-64">
+            {isAiSpeaking ? (
+                // AI Speaking Animation
+                Array.from({ length: 8 }).map((_, i) => (
+                    <div key={i} className="w-2 bg-purple-500 rounded-full animate-[bounce_1s_infinite]" style={{ animationDelay: `${i * 0.1}s`, height: '30%' }}></div>
+                ))
+            ) : (
+                // User Mic Visualizer
+                micActive ? (
+                    <>
+                        <div className="w-2 bg-green-500 rounded-full transition-all duration-75" style={{ height: `${Math.max(10, Math.min(100, volumeLevel * 300))}%` }}></div>
+                        <div className="w-2 bg-green-500 rounded-full transition-all duration-75" style={{ height: `${Math.max(10, Math.min(100, volumeLevel * 400))}%` }}></div>
+                        <div className="w-2 bg-green-500 rounded-full transition-all duration-75" style={{ height: `${Math.max(10, Math.min(100, volumeLevel * 200))}%` }}></div>
+                    </>
+                ) : (
+                    <div className="text-slate-600 text-sm font-medium tracking-widest uppercase">Mic Muted</div>
+                )
+            )}
+        </div>
+
+        {error && (
+            <div className="mt-4 px-4 py-2 bg-red-900/50 border border-red-500/30 rounded-lg text-red-200 text-sm flex items-center gap-2">
+                <Radio size={16} />
+                {error}
+            </div>
+        )}
+      </div>
+
+      {/* Control Bar */}
+      <div className="bg-slate-900/80 backdrop-blur-md border-t border-slate-800 p-6 flex justify-center items-center gap-8 relative z-30">
+        <button 
+            onClick={toggleMic}
+            className={`p-5 rounded-full transition-all duration-200 transform hover:scale-110 ${
+                micActive 
+                ? 'bg-slate-800 text-white hover:bg-slate-700 border border-slate-600 shadow-lg' 
+                : 'bg-red-500 text-white hover:bg-red-600 shadow-red-500/30 shadow-lg border border-red-400'
+            }`}
+        >
+            {micActive ? <Mic size={28} /> : <MicOff size={28} />}
+        </button>
+
+        <button 
+            onClick={onEndSession}
+            className="p-6 rounded-full bg-red-600 text-white hover:bg-red-500 transition-all duration-200 transform hover:scale-110 shadow-xl shadow-red-900/40 border-4 border-slate-900"
+            title="End Call"
+        >
+            <PhoneOff size={32} />
+        </button>
+
+        <div className="absolute right-8 top-1/2 -translate-y-1/2 hidden md:flex items-center gap-3 text-slate-500">
+             <Zap size={16} className={status === 'Connected' ? 'text-yellow-500' : ''} />
+             <span className="text-xs font-mono">
+                 {useCustomVoice ? 'ELEVENLABS + GEMINI LIVE' : 'GEMINI 2.5 LIVE'}
+             </span>
+        </div>
+      </div>
     </div>
   );
 };
