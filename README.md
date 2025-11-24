@@ -3,9 +3,7 @@
 
 **Link to the webapp:** https://copy-of-personaai-avatar-466019446946.us-west1.run.app
 
-<video width="480" controls>
-  <source src="https://youtu.be/Tf_ezorw85Q" type="video/mp4">
-</video>
+[![Memory Avatar Demo](https://img.youtube.com/vi/abc123XYZ/hqdefault.jpg)](https://youtu.be/Tf_ezorw85Q)
 
 ## Motivation
 Loss is a profound human experience, and often we are left wishing for just one more conversation with a loved one. "Back to Life" is motivated by the desire to use advanced AI not just for productivity, but for emotional connection. It bridges the gap between static memories (photos, diaries) and dynamic interaction, allowing users to "bring to life" a digital persona that feels familiar, warm, and responsive.
