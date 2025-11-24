@@ -1,4 +1,3 @@
-
 import React, { useEffect, useRef, useState } from 'react';
 import { GoogleGenAI, LiveServerMessage, Modality } from "@google/genai";
 import { AvatarProfile } from '../types';
@@ -77,7 +76,7 @@ const LiveSession: React.FC<Props> = ({ profile, onEndSession }) => {
 
   const startSession = async () => {
     try {
-      setStatus('Connecting to Gemini Live...');
+      setStatus('Connecting...');
       
       const AudioContextClass = window.AudioContext || window.webkitAudioContext;
       inputContextRef.current = new AudioContextClass({ sampleRate: AUDIO_SAMPLE_RATE_INPUT });
@@ -350,18 +349,10 @@ const LiveSession: React.FC<Props> = ({ profile, onEndSession }) => {
 
         <button 
             onClick={onEndSession}
-            className="p-6 rounded-full bg-red-600 text-white hover:bg-red-500 transition-all duration-200 transform hover:scale-110 shadow-xl shadow-red-900/40 border-4 border-slate-900"
-            title="End Call"
+            className="p-6 rounded-full bg-red-600 text-white hover:bg-red-500 transition-all duration-200 transform hover:scale-110 shadow-lg shadow-red-600/30"
         >
-            <PhoneOff size={32} />
+            <PhoneOff size={28} />
         </button>
-
-        <div className="absolute right-8 top-1/2 -translate-y-1/2 hidden md:flex items-center gap-3 text-slate-500">
-             <Zap size={16} className={status === 'Connected' ? 'text-yellow-500' : ''} />
-             <span className="text-xs font-mono">
-                 {useCustomVoice ? 'ELEVENLABS + GEMINI LIVE' : 'GEMINI 2.5 LIVE'}
-             </span>
-        </div>
       </div>
     </div>
   );

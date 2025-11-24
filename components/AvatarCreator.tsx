@@ -83,13 +83,13 @@ const AvatarCreator: React.FC<Props> = ({ onProfileCreated }) => {
     <div className="max-w-2xl mx-auto p-6 bg-slate-800 rounded-xl shadow-xl border border-slate-700 overflow-y-auto max-h-full">
       <h2 className="text-2xl font-bold mb-6 text-white flex items-center gap-2">
         <UserCircle2 className="text-purple-400" />
-        Setup Persona Profile
+        A Memory Avatar
       </h2>
 
       <div className="space-y-6">
         {/* Image Upload */}
         <div>
-            <label className="block text-sm font-medium text-slate-300 mb-2">1. Avatar Face</label>
+            <label className="block text-sm font-medium text-slate-300 mb-2">1. Face of Loved One</label>
             <div className="flex items-center gap-4">
                 <div className={`relative w-32 h-32 rounded-full bg-slate-700 overflow-hidden border-2 border-dashed border-slate-500 flex items-center justify-center ${!imagePreview ? 'hover:border-purple-400 transition-colors' : ''}`}>
                     {imagePreview ? (
@@ -100,7 +100,7 @@ const AvatarCreator: React.FC<Props> = ({ onProfileCreated }) => {
                     <input type="file" accept="image/*" onChange={handleImageUpload} className="absolute inset-0 opacity-0 cursor-pointer" />
                 </div>
                 <div className="text-xs text-slate-400 flex-1">
-                    Upload a portrait. This image will represent the AI during the voice conversation.
+                    Upload a portrait. This image will be animated during the conversation.
                 </div>
             </div>
         </div>
@@ -114,13 +114,13 @@ const AvatarCreator: React.FC<Props> = ({ onProfileCreated }) => {
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     className="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white focus:ring-2 focus:ring-purple-500 outline-none"
-                    placeholder="e.g. Cyber Sage"
+                    placeholder="e.g. Nana Rose"
                 />
             </div>
             <div>
                  <label className="block text-sm font-medium text-slate-300 mb-1">
-                    Default Voice (Gemini)
-                    <span className="text-xs text-slate-500 ml-2">(Live Mode Only)</span>
+                    Default Voice
+                    <span className="text-xs text-slate-500 ml-2">(Generic)</span>
                  </label>
                  <select 
                      value={voice} 
@@ -192,7 +192,7 @@ const AvatarCreator: React.FC<Props> = ({ onProfileCreated }) => {
                     />
                     <span className="flex items-center gap-2">
                         <Mic2 size={16} className="text-indigo-400" />
-                        Clone Custom Voice (ElevenLabs)
+                        Clone Real Voice
                     </span>
                 </label>
                 {useElevenLabs && (
@@ -231,7 +231,7 @@ const AvatarCreator: React.FC<Props> = ({ onProfileCreated }) => {
             ) : (
                 <>
                     <CheckCircle2 size={20} />
-                    Create & Start Talking
+                    Bring to Life
                 </>
             )}
         </button>

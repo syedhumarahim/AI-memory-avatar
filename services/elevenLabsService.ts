@@ -3,7 +3,7 @@
 
 // --- ELEVENLABS API KEY CONFIGURATION ---
 // PASTE YOUR ELEVENLABS API KEY BETWEEN THE QUOTES BELOW
-const HARDCODED_XI_API_KEY = ""; 
+const HARDCODED_XI_API_KEY = "sk_0f1f5fe9ff30abaa5a30cdfe97a25b760e8cb240d97416f6"; 
 // ----------------------------------------
 
 export const createElevenLabsVoice = async (name: string, sampleBlob: Blob): Promise<string> => {

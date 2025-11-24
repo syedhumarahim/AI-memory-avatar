@@ -63,14 +63,18 @@ const App: React.FC = () => {
         <div className="max-w-4xl mx-auto h-full">
             <header className="mb-8">
                 <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-indigo-400 to-purple-400">
-                    {currentView === AppView.CREATE && "Create Persona"}
-                    {currentView === AppView.CHAT && "Conversation"}
-                    {currentView === AppView.LIVE && "Live Interface"}
+                    {currentView === AppView.CREATE && "Back to Life"}
+                    {currentView === AppView.CHAT && "Chat"}
+                    {currentView === AppView.LIVE && "Voice Call"}
                 </h1>
-                <p className="text-slate-400 mt-2">
-                    {currentView === AppView.CREATE && "Bring a photo to life with memory and voice."}
-                    {currentView === AppView.CHAT && "Text or speak to your avatar. It responds with voice and video."}
-                    {currentView === AppView.LIVE && "Real-time, low-latency voice conversation powered by Gemini Live API."}
+                <p className="text-slate-400 mt-2 text-lg">
+                    {currentView === AppView.CREATE && (
+                        <>
+                           <span className="font-semibold text-indigo-300">A Memory Avatar.</span> Create an AI avatar of a loved one. Bring a photo to life with memory and voice.
+                        </>
+                    )}
+                    {currentView === AppView.CHAT && "Chat with your loved one. Relive memories together."}
+                    {currentView === AppView.LIVE && "Share a moment together in real-time. Just talk, naturally."}
                 </p>
             </header>
 

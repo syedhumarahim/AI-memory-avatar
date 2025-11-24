@@ -6,7 +6,7 @@ import { buildSystemPrompt } from "../utils/promptUtils";
 
 // --- API KEY CONFIGURATION ---
 // PASTE YOUR API KEY BETWEEN THE QUOTES BELOW
-const HARDCODED_API_KEY = "sk_0f1f5fe9ff30abaa5a30cdfe97a25b760e8cb240d97416f6"; 
+const HARDCODED_API_KEY = "AIzaSyCz1lrPpm9t07PGx2xeFXl7WjTMRXdr4SA"; 
 // -----------------------------
 
 const getAiClient = () => {
